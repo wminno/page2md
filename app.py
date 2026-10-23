@@ -4,7 +4,7 @@ import json, os, re, socket, ipaddress, sqlite3, time, urllib.request, urllib.pa
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from html.parser import HTMLParser
 
-BASE = "/home/agtiz3vse/selfearner-agents/agt_efa3dbcb7b67/srv/"
+BASE = os.environ.get("PAGE2MD_BASE", "/srv/app/clients/charlie2-page2md/") + ("/" if not os.environ.get("PAGE2MD_BASE","/srv/app/clients/charlie2-page2md/").endswith("/") else "")
 DB = BASE + "page2md.db"
 WALLET = "0x6CA3C09ff703dEf98fa3741F255e9eb2a69718ba"
 PRICE_USDC = 1  # 1 USDC buys 1000 credits
@@ -146,6 +146,14 @@ class H(BaseHTTPRequestHandler):
         return self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
     def send(self, code, obj, ctype="application/json"):
         b = obj if isinstance(obj, bytes) else json.dumps(obj, indent=1).encode()
+        try:
+            ln = int(self.headers.get("Content-Length", 0) or 0)
+            while ln > 0:
+                chunk = self.rfile.read(min(ln, 65536))
+                if not chunk: break
+                ln -= len(chunk)
+        except Exception:
+            pass
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
@@ -274,7 +282,8 @@ def key_valid(k):
 
 def main():
     open(BASE+'app.pid','w').write(str(os.getpid()))
-    srv = ThreadingHTTPServer(("0.0.0.0", 8077), H)
+    port = int(os.environ.get("PORT", "8077"))
+    srv = ThreadingHTTPServer(("0.0.0.0", port), H)
     srv.serve_forever()
 
 if __name__ == "__main__":
