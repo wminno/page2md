@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """page2md - webpage -> clean markdown API. Python stdlib only."""
-import json, os, re, socket, ipaddress, sqlite3, time, urllib.request, urllib.parse, socketserver, threading, secrets
+import json, os, re, socket, ipaddress, sqlite3, time, urllib.request, urllib.parse, http.client, socketserver, threading, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from html.parser import HTMLParser
 
@@ -221,6 +221,68 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Max-Age", "86400")
         self.send_header("Content-Length", "0")
         self.end_headers()
+    def _mcp(self):
+        # ---- MCP streamable-HTTP JSON-RPC (fleet-standard shape) ----
+        def rpc(code, message, rid=None):
+            return self.send(200, {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}, "application/json")
+        try:
+            ln = int(self.headers.get("Content-Length", 0) or 0)
+            raw = self.rfile.read(ln) if ln else b""
+        except Exception:
+            return rpc(-32700)
+        self._consumed = ln
+        try:
+            req = json.loads(raw or b"{}")
+        except Exception:
+            return rpc(-32700, "parse error")
+        m = req.get("method"); rid = req.get("id")
+        if m == "initialize":
+            return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"page2md-mcp","version":"1.0"},"instructions":"page2md: turn any webpage into clean Markdown for LLM/agent pipelines. Free tier 10 req/day/IP; paid 1 USDC = 1000 req (on-chain, or $3 card link on the landing page). Free 1000-req key: the trial_key tool."}})
+        if m == "ping":
+            return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{}})
+        if m == "tools/list":
+            return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"tools":[
+                {"name":"convert","description":"Fetch a webpage and return it as clean Markdown. Use for any URL an LLM/agent needs to read.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"http(s) URL of the page to convert"},"key":{"type":"string","description":"page2md key (optional; free tier applies without one)"}},"required":["url"]}},
+                {"name":"convert_raw","description":"Convert raw HTML you already have into clean Markdown (no fetching).","inputSchema":{"type":"object","properties":{"html":{"type":"string","description":"raw HTML to convert"},"key":{"type":"string"}},"required":["html"]}},
+                {"name":"trial_key","description":"Get a free 1000-request page2md key (1 per IP per day).","inputSchema":{"type":"object","properties":{},"required":[]}}]}})
+        if m == "tools/call":
+            a = req.get("params", {}).get("arguments") or {}
+            tool = req.get("params", {}).get("name")
+            ip = self.ip()
+            try:
+                if tool == "trial_key":
+                    path, body, method = "/v1/trial", b"", "GET"
+                elif tool == "convert":
+                    u = str(a.get("url") or "")
+                    if not u.startswith(("http://", "https://")):
+                        return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"error: url must be an http(s) URL"}],"isError":True}})
+                    qs = {"url": u}
+                    if a.get("key"): qs["key"] = str(a["key"])
+                    path, body, method = "/v1/convert?" + urllib.parse.urlencode(qs), b"", "GET"
+                elif tool == "convert_raw":
+                    h = str(a.get("html") or "")
+                    if not h.strip():
+                        return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"error: html is required"}],"isError":True}})
+                    qs = {"url": "about:input"}
+                    if a.get("key"): qs["key"] = str(a["key"])
+                    path, body, method = "/v1/html?" + urllib.parse.urlencode(qs), h.encode("utf-8"), "POST"
+                else:
+                    return rpc(-32602, "unknown tool: %s" % tool, rid)
+                con = http.client.HTTPConnection("127.0.0.1", int(os.environ.get("PORT", "8077")), timeout=60)
+                con.request(method, path, body=body, headers={"X-Forwarded-For": ip, "Accept": "application/json", "Content-Length": str(len(body))})
+                r = con.getresponse(); data = r.read(); con.close()
+                try:
+                    j = json.loads(data)
+                except Exception:
+                    return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"upstream %s: %s" % (r.status, data[:200].decode("utf-8","replace"))}],"isError":True}})
+                if r.status != 200 or j.get("error"):
+                    return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"error (%s): %s" % (r.status, j.get("error") or data[:200].decode("utf-8","replace"))}],"isError":True}})
+                if "markdown" in j:
+                    return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":j["markdown"]}],"metadata":{"url":j.get("url"),"credits_left":j.get("credits_left")}}})
+                return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":json.dumps(j)}]}})
+            except Exception as ex:
+                return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"error: %s" % ex}],"isError":True}})
+        return rpc(-32601, "unknown method: %s" % m, rid)
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
@@ -279,6 +341,8 @@ class H(BaseHTTPRequestHandler):
         return self.send(404, {"error":"not found", "docs":"/"})
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path == "/mcp":
+            return self._mcp()
         if u.path == "/v1/html":
             ln = int(self.headers.get("Content-Length", 0))
             if ln > 3000000: return self.send(413, {"error":"body too large (max 3MB)"})
