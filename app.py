@@ -21,6 +21,7 @@ lock = threading.Lock()
 def db():
     c = sqlite3.connect(DB, timeout=15)
     c.execute("CREATE TABLE IF NOT EXISTS keys(key TEXT PRIMARY KEY, credits INTEGER, created REAL, note TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS trials(ip TEXT PRIMARY KEY, day TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS usage(day TEXT, ident TEXT, cnt INTEGER, PRIMARY KEY(day, ident))")
     c.execute("CREATE TABLE IF NOT EXISTS claims(tx TEXT PRIMARY KEY, key TEXT, credits INTEGER, ts REAL)")
     c.commit()
@@ -146,14 +147,17 @@ class H(BaseHTTPRequestHandler):
         return self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
     def send(self, code, obj, ctype="application/json"):
         b = obj if isinstance(obj, bytes) else json.dumps(obj, indent=1).encode()
-        try:
-            ln = int(self.headers.get("Content-Length", 0) or 0)
-            while ln > 0:
-                chunk = self.rfile.read(min(ln, 65536))
-                if not chunk: break
-                ln -= len(chunk)
-        except Exception:
-            pass
+        # drain only an UNREAD request body (keep-alive sync). Handlers that
+        # already read the body set _consumed; draining again blocks forever.
+        if not getattr(self, "_consumed", 0):
+            try:
+                ln = int(self.headers.get("Content-Length", 0) or 0)
+                while ln > 0:
+                    chunk = self.rfile.read(min(ln, 65536))
+                    if not chunk: break
+                    ln -= len(chunk)
+            except Exception:
+                pass
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
@@ -244,6 +248,24 @@ class H(BaseHTTPRequestHandler):
             if not key_valid(key): return self.send(404, {"error":"unknown key"})
             c = db(); row = c.execute("SELECT credits FROM keys WHERE key=?", (key,)).fetchone(); c.close()
             return self.send(200, {"key":key, "credits": row[0]})
+        if self.path == "/v1/trial":
+            ip = self.ip()
+            day = time.strftime("%Y-%m-%d", time.gmtime())
+            with lock:
+                c = db()
+                row = c.execute("SELECT day FROM trials WHERE ip=?", (ip,)).fetchone()
+                if row and row[0] == day:
+                    c.close()
+                    return self.send(429, {"error":"trial key already issued from this IP today (keys are free, 1000 requests each)"})
+                if row:
+                    c.execute("UPDATE trials SET day=? WHERE ip=?", (day, ip))
+                else:
+                    c.execute("INSERT INTO trials VALUES(?,?)", (ip, day))
+                key = "k_" + secrets.token_hex(16)
+                c.execute("INSERT INTO keys VALUES(?,?,?,?)", (key, 1000, time.time(), "trial:" + ip))
+                c.commit(); c.close()
+            return self.send(200, {"ok": True, "key": key, "credits": 1000, "note": "free trial key, 1000 requests; renewal is paid: 1 USDC = 1000 requests via POST /v1/claim, or $3 card on the landing page"})
+
         return self.send(404, {"error":"not found", "docs":"/"})
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
@@ -251,6 +273,7 @@ class H(BaseHTTPRequestHandler):
             ln = int(self.headers.get("Content-Length", 0))
             if ln > 3000000: return self.send(413, {"error":"body too large (max 3MB)"})
             html = self.rfile.read(ln).decode("utf-8", "replace")
+            self._consumed = ln
             if not html.strip(): return self.send(400, {"error":"empty body; send raw HTML"})
             q = urllib.parse.parse_qs(u.query)
             url = (q.get("url") or [None])[0] or "about:input"
@@ -264,6 +287,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/v1/claim":
             ln = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(ln) or b"{}")
+            self._consumed = ln
             tx = (body.get("tx") or "").strip()
             credits, chain = verify_tx(tx)
             if not credits:
