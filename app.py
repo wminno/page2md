@@ -159,7 +159,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(b)
+        if not getattr(self, '_head', False): self.wfile.write(b)
         try: open(BASE + "hits.log","a").write("%s %s %s\n" % (time.strftime("%H:%M:%S"), self.command, self.path[:60]))
         except Exception as e: open(BASE + "hits.err","a").write(repr(e))
     def page(self, body, code=200, ctype="text/html; charset=utf-8"):
@@ -181,7 +181,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(b)
+        if not getattr(self, '_head', False): self.wfile.write(b)
     def spend(self, key, ident):
         with lock:
             c = db()
@@ -192,6 +192,13 @@ class H(BaseHTTPRequestHandler):
             left = c.execute("SELECT credits FROM keys WHERE key=?", (key,)).fetchone() if (key and key_valid(key)) else None
             c.close()
         return left[0] if left else None
+    def do_HEAD(self):
+        # HEAD = GET without a body; link checkers (e.g. HN) treat 501 as dead link
+        self._head = True
+        try:
+            self.do_GET()
+        finally:
+            self._head = False
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
