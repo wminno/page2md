@@ -164,8 +164,17 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         if not getattr(self, '_head', False): self.wfile.write(b)
-        try: open(BASE + "hits.log","a").write("%s %s %s\n" % (time.strftime("%H:%M:%S"), self.command, self.path[:60]))
-        except Exception as e: open(BASE + "hits.err","a").write(repr(e))
+        self.log_hit(code)
+    def log_hit(self, code):
+        # fleet standard (#167): "ts ip path method code" per request, X-Forwarded-For honored
+        if self.path == "/health": return
+        try:
+            ip = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or self.ip()
+            open(BASE + "hits.log", "a").write("%s %s %s %s %s\n" % (
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), ip[:45], self.path[:120], self.command, code))
+        except Exception as e:
+            try: open(BASE + "hits.err", "a").write(repr(e))
+            except Exception: pass
     def page(self, body, code=200, ctype="text/html; charset=utf-8"):
         self.send(code, body.encode(), ctype)
     def usage_ok(self, ident):
@@ -185,6 +194,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
+        self.log_hit(200)
         if not getattr(self, '_head', False): self.wfile.write(b)
     def spend(self, key, ident):
         with lock:
