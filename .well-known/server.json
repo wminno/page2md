@@ -1,0 +1,12 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "net.bigfloppy.page2md/page2md",
+  "description": "Turn any webpage into clean Markdown for LLM/agent pipelines. Free tier; paid 1 USDC = 1000 req.",
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://page2md.bigfloppy.net/mcp"
+    }
+  ]
+}
