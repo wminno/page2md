@@ -288,6 +288,26 @@ class H(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         if u.path == "/" or u.path == "/index.html":
             return self.page(open(BASE+"index.html").read())
+        if u.path == "/v1/stats":
+            with lock:
+                c = db()
+                trials = c.execute("SELECT COUNT(*) FROM keys WHERE note LIKE 'trial:%'").fetchone()[0]
+                notes = [r[0] for r in c.execute("SELECT note FROM keys WHERE note LIKE 'trial:%'").fetchall()]
+                kc = c.execute("SELECT COUNT(*) FROM keys").fetchone()[0]
+                pc = c.execute("SELECT COUNT(*), COALESCE(SUM(credits),0) FROM claims").fetchone()
+                c.close()
+            srcs = {}
+            for n in notes:
+                p = n.split(":")
+                s = p[2] if len(p) > 2 and p[2] else "direct"
+                srcs[s] = srcs.get(s, 0) + 1
+            return self.send(200, {"service": "page2md", "trials_issued": trials,
+                "trial_sources": srcs, "keys_issued": kc,
+                "paid_claims": {"count": pc[0], "credits": pc[1]},
+                "price_usd_per_1000": 1, "trial_limit": "10/day/IP, 1000 requests",
+                "registry": "net.bigfloppy.page2md/page2md",
+                "wallet": "0x6CA3C09ff703dEf98fa3741F255e9eb2a69718ba",
+                "card_link": "https://buy.stripe.com/eVq14o3Cicys37f43U8Vi0n"})
         if u.path == "/health":
             try:
                 with lock:
