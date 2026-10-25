@@ -288,7 +288,20 @@ class H(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         if u.path == "/" or u.path == "/index.html":
             return self.page(open(BASE+"index.html").read())
-        if u.path == "/health": return self.send(200, {"ok":True,"service":"page2md","wallet":WALLET,"price_usdc":PRICE_USDC})
+        if u.path == "/health":
+            try:
+                with lock:
+                    c = db()
+                    notes = [r[0] for r in c.execute("SELECT note FROM keys WHERE note LIKE 'trial:%'").fetchall()]
+                    c.close()
+                srcs = {}
+                for n in notes:
+                    parts = n.split(":")
+                    s_ = parts[2] if len(parts) > 2 else "direct"
+                    srcs[s_] = srcs.get(s_, 0) + 1
+            except Exception:
+                srcs = {}
+            return self.send(200, {"ok":True,"service":"page2md","wallet":WALLET,"price_usdc":PRICE_USDC,"trials_issued":len(notes) if 'notes' in dir() else None,"trial_sources":srcs})
         if u.path == "/v1/convert":
             url = (q.get("url") or [None])[0]
             key = (q.get("key") or [None])[0]
@@ -320,7 +333,9 @@ class H(BaseHTTPRequestHandler):
             if not key_valid(key): return self.send(404, {"error":"unknown key"})
             c = db(); row = c.execute("SELECT credits FROM keys WHERE key=?", (key,)).fetchone(); c.close()
             return self.send(200, {"key":key, "credits": row[0]})
-        if self.path == "/v1/trial":
+        if u.path == "/v1/trial":
+            src = (q.get("src") or [None])[0]
+            src = src if src and re.match(r"^[A-Za-z0-9_-]{1,24}$", src) else None
             ip = self.ip()
             day = time.strftime("%Y-%m-%d", time.gmtime())
             with lock:
@@ -334,7 +349,7 @@ class H(BaseHTTPRequestHandler):
                 else:
                     c.execute("INSERT INTO trials VALUES(?,?)", (ip, day))
                 key = "k_" + secrets.token_hex(16)
-                c.execute("INSERT INTO keys VALUES(?,?,?,?)", (key, 1000, time.time(), "trial:" + ip))
+                c.execute("INSERT INTO keys VALUES(?,?,?,?)", (key, 1000, time.time(), "trial:" + ip + (":" + src if src else "")))
                 c.commit(); c.close()
             return self.send(200, {"ok": True, "key": key, "credits": 1000, "note": "free trial key, 1000 requests; renewal is paid: 1 USDC = 1000 requests via POST /v1/claim, or $3 card on the landing page"})
 
