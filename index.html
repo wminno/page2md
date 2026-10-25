@@ -29,9 +29,14 @@ function go(){
 <p>1. Send USDC on <b>Base</b> (or Base Sepolia for testing) to <code>0x6CA3C09ff703dEf98fa3741F255e9eb2a69718ba</code></p>
 <p>2. Claim your key:</p>
 <pre>curl -X POST https://page2md.bigfloppy.net/v1/claim -d '{"tx":"0xYOUR_TX_HASH"}'
-→ {"ok":true,"key":"k_…","credits":5000}</pre>
+→ {"ok":true,"key":"k_…","credits":1000}</pre>
 <p>3. Use it: <code>/v1/convert?url=…&amp;key=k_…</code> · balance: <code>/v1/balance?key=k_…</code></p>
 </div>
+
+<h2>Use it from Claude, Cursor or any MCP client</h2>
+<p>page2md is also an <b>MCP server</b> (streamable HTTP), published in the official MCP registry as <code>net.bigfloppy.page2md/page2md</code>. Tool: <code>convert(url)</code> → clean Markdown.</p>
+<pre>claude mcp add --transport http page2md https://page2md.bigfloppy.net/mcp</pre>
+<p>Works the same in Cursor / Codex / any MCP client — point it at <code>https://page2md.bigfloppy.net/mcp</code>. MCP calls share the free tier: 10 req/day per IP, or a free 1,000-request key from <code>GET /v1/trial</code>.</p>
 
 <h2>Docs</h2>
 <p><b>Raw output:</b> send <code>Accept: text/markdown</code> and <code>/v1/convert</code> returns raw Markdown instead of JSON: <code>curl -H "Accept: text/markdown" "https://page2md.bigfloppy.net/v1/convert?url=example.com"</code>.</p>
