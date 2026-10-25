@@ -338,6 +338,10 @@ class H(BaseHTTPRequestHandler):
                 c.commit(); c.close()
             return self.send(200, {"ok": True, "key": key, "credits": 1000, "note": "free trial key, 1000 requests; renewal is paid: 1 USDC = 1000 requests via POST /v1/claim, or $3 card on the landing page"})
 
+        if u.path == "/.well-known/mcp-registry-auth":
+            try: return self.send(200, open(BASE+".well-known/mcp-registry-auth","rb").read(), "application/octet-stream")
+            except OSError: return self.send(404, {"error":"not available"})
+
         return self.send(404, {"error":"not found", "docs":"/"})
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
