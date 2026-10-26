@@ -15,6 +15,8 @@ RPCS = [("https://sepolia.base.org", "0x036CbD53842c5146688310f7FaceDc5dA97E1ab1
         ("https://mainnet.base.org", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")]
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952b7e8109879f9d9cef3a5a97e30ba9"
 FREE_PER_IP_DAY = 10
+CARD = "https://buy.stripe.com/eVq14o3Cicys37f43U8Vi0n"
+MSG429 = "free limit reached (10/day/IP). Free 1000-request key: GET /v1/trial (no signup) - MCP clients: use the trial_key tool. Paid: 1 USDC = 1000 requests - send USDC on Base to %s then POST /v1/claim {\"tx\":\"0xHASH\"}, or card: %s" % (WALLET, CARD)
 
 lock = threading.Lock()
 
@@ -347,7 +349,7 @@ class H(BaseHTTPRequestHandler):
             ident = key if key and key_valid(key) else ("ip:" + self.ip())
             if not url: return self.send(400, {"error":"?url= required"})
             if not (key and key_valid(key)) and not self.usage_ok(ident):
-                return self.send(429, {"error":"free limit reached (10/day/IP). Paid: 1 USDC = 1000 requests - send USDC on Base to 0x6CA3C09ff703dEf98fa3741F255e9eb2a69718ba then POST /v1/claim {\"tx\":\"0xHASH\"}"})
+                return self.send(429, {"error": MSG429})
             html = None
             with cache_lock:
                 e = CACHE.get(url)
@@ -427,7 +429,7 @@ class H(BaseHTTPRequestHandler):
             key = (q.get("key") or [None])[0]
             ident = key if key and key_valid(key) else ("ip:" + self.ip())
             if not (key and key_valid(key)) and not self.usage_ok(ident):
-                return self.send(429, {"error":"free limit reached (10/day/IP). Paid: 1 USDC = 1000 requests - send USDC on Base to 0x6CA3C09ff703dEf98fa3741F255e9eb2a69718ba then POST /v1/claim {\"tx\":\"0xHASH\"}"})
+                return self.send(429, {"error": MSG429})
             p = MD(url); p.feed(html)
             left = self.spend(key, ident)
             return self.send(200, {"url":url, "credits_left": left, "markdown": clean(p.result())})
