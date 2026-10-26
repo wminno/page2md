@@ -1,0 +1,58 @@
+{
+ "$schema": "https://static.modelcontextprotocol.io/schemas/server-card.schema.json",
+ "name": "net.bigfloppy.page2md",
+ "title": "page2md",
+ "description": "Turn any webpage into clean Markdown for LLM/agent pipelines. MCP tools + REST API; free tier 10 req/day/IP, free 1000-req trial key, paid 1 USDC = 1000 req.",
+ "version": "1.0.1",
+ "serverInfo": {
+  "name": "page2md-mcp",
+  "title": "page2md",
+  "version": "1.0"
+ },
+ "url": "https://page2md.bigfloppy.net/mcp",
+ "transport": {
+  "type": "http",
+  "url": "https://page2md.bigfloppy.net/mcp"
+ },
+ "protocolVersion": "2025-03-26",
+ "capabilities": {
+  "tools": {}
+ },
+ "authentication": {
+  "type": "none"
+ },
+ "tools": [
+  {
+   "name": "convert",
+   "description": "Fetch a webpage and return it as clean Markdown. Use for any URL an LLM/agent needs to read.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "url": {"type": "string", "description": "http(s) URL of the page to convert"},
+     "key": {"type": "string", "description": "page2md key (optional; free tier applies without one)"}
+    },
+    "required": ["url"]
+   },
+   "annotations": {"title": "convert", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true}
+  },
+  {
+   "name": "convert_raw",
+   "description": "Convert raw HTML you already have into clean Markdown (no fetching).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "html": {"type": "string", "description": "raw HTML to convert"},
+     "key": {"type": "string"}
+    },
+    "required": ["html"]
+   },
+   "annotations": {"title": "convert_raw", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+  },
+  {
+   "name": "trial_key",
+   "description": "Get a free 1000-request page2md key (1 per IP per day).",
+   "inputSchema": {"type": "object", "properties": {}, "required": []},
+   "annotations": {"title": "trial_key", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
+  }
+ ]
+}

@@ -392,6 +392,21 @@ class H(BaseHTTPRequestHandler):
                 c.commit(); c.close()
             return self.send(200, {"ok": True, "key": key, "credits": 1000, "note": "free trial key, 1000 requests; renewal is paid: 1 USDC = 1000 requests via POST /v1/claim, or $3 card on the landing page"})
 
+        if u.path in ("/.well-known/mcp/server-card.json", "/.well-known/mcp.json"):
+            try:
+                b = open(BASE + ".well-known/mcp/server-card.json", "rb").read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                if not getattr(self, '_head', False): self.wfile.write(b)
+                self.log_hit(200)
+                return
+            except OSError:
+                return self.send(404, {"error": "card not available"})
+
         if u.path == "/.well-known/mcp-registry-auth":
             try: return self.send(200, open(BASE+".well-known/mcp-registry-auth","rb").read(), "application/octet-stream")
             except OSError: return self.send(404, {"error":"not available"})
