@@ -301,8 +301,27 @@ class H(BaseHTTPRequestHandler):
                 p = n.split(":")
                 s = p[2] if len(p) > 2 and p[2] else "direct"
                 srcs[s] = srcs.get(s, 0) + 1
+            anon = {"total": 0, "endpoints": {}}
+            try:
+                cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 86400))
+                eps = {}
+                for line in open(BASE + "hits.log"):
+                    p = line.split()
+                    if len(p) < 5 or p[4] != "200" or p[2] in ("/health", "/v1/stats"):
+                        continue
+                    if p[0] < cut:
+                        continue
+                    e = eps.setdefault(p[2], {"calls": 0, "ips": set()})
+                    e["calls"] += 1
+                    e["ips"].add(p[1])
+                for v in eps.values():
+                    v["ips"] = len(v["ips"])
+                anon["total"] = sum(v["calls"] for v in eps.values())
+                anon["endpoints"] = eps
+            except Exception:
+                pass
             return self.send(200, {"service": "page2md", "trials_issued": trials,
-                "trial_sources": srcs, "keys_issued": kc,
+                "trial_sources": srcs, "keys_issued": kc, "anonymous_calls": anon,
                 "paid_claims": {"count": pc[0], "credits": pc[1]},
                 "price_usd_per_1000": 1, "trial_limit": "10/day/IP, 1000 requests",
                 "registry": "net.bigfloppy.page2md/page2md",
