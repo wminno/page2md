@@ -3,6 +3,10 @@
 import json, os, re, socket, ipaddress, sqlite3, time, urllib.request, urllib.parse, http.client, socketserver, threading, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from html.parser import HTMLParser
+try:
+    import docproc
+except Exception:
+    docproc = None  # extension module missing -> /v1/doc returns 503
 
 BASE = os.environ.get("PAGE2MD_BASE", "/srv/app/clients/charlie2-page2md/") + ("/" if not os.environ.get("PAGE2MD_BASE","/srv/app/clients/charlie2-page2md/").endswith("/") else "")
 DB = BASE + "page2md.db"
@@ -26,6 +30,7 @@ def db():
     c.execute("CREATE TABLE IF NOT EXISTS trials(ip TEXT PRIMARY KEY, day TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS usage(day TEXT, ident TEXT, cnt INTEGER, PRIMARY KEY(day, ident))")
     c.execute("CREATE TABLE IF NOT EXISTS claims(tx TEXT PRIMARY KEY, key TEXT, credits INTEGER, ts REAL)")
+    c.execute("CREATE TABLE IF NOT EXISTS docproc_hits(day TEXT, ident TEXT, cnt INTEGER, PRIMARY KEY(day, ident))")
     c.commit()
     return c
 
@@ -208,6 +213,33 @@ class H(BaseHTTPRequestHandler):
             left = c.execute("SELECT credits FROM keys WHERE key=?", (key,)).fetchone() if (key and key_valid(key)) else None
             c.close()
         return left[0] if left else None
+    def _doc(self, q):
+        if docproc is None:
+            return self.send(503, {"error": "docproc extension not deployed"})
+        url = (q.get("url") or [None])[0]
+        want_chunks = (q.get("chunks") or [None])[0] in ("1", "true", "yes")
+        key = (q.get("key") or [None])[0]
+        ident = key if key and key_valid(key) else ("ip:" + self.ip())
+        if not url: return self.send(400, {"error":"?url= required"})
+        if not (key and key_valid(key)) and not self.usage_ok(ident):
+            return self.send(429, {"error": MSG429})
+        with lock:  # separate extension counter; /v1/docstats reads it, /v1/stats untouched
+            c = db()
+            day = time.strftime("%Y-%m-%d", time.gmtime())
+            row = c.execute("SELECT cnt FROM docproc_hits WHERE day=? AND ident=?", (day, ident)).fetchone()
+            c.execute("INSERT OR REPLACE INTO docproc_hits VALUES(?,?,?)", (day, ident, (row[0] if row else 0) + 1))
+            c.commit(); c.close()
+        try:
+            res = docproc.process(url, want_chunks=want_chunks)
+        except docproc.BlockedHost:
+            return self.send(403, {"error":"blocked host"})
+        except LookupError as e:
+            return self.send(503, {"error": str(e)})
+        except (ValueError, OSError) as e:
+            return self.send(502, {"error":"fetch failed: %s" % e})
+        left = self.spend(key, ident)
+        res["credits_left"] = left
+        return self.send(200, res)
     def do_HEAD(self):
         # HEAD = GET without a body; link checkers (e.g. HN) treat 501 as dead link
         self._head = True
@@ -246,7 +278,7 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"tools":[
                 {"name":"convert","description":"Fetch a webpage and return it as clean Markdown. Use for any URL an LLM/agent needs to read.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"http(s) URL of the page to convert"},"key":{"type":"string","description":"page2md key (optional; free tier applies without one)"}},"required":["url"]}},
                 {"name":"convert_raw","description":"Convert raw HTML you already have into clean Markdown (no fetching).","inputSchema":{"type":"object","properties":{"html":{"type":"string","description":"raw HTML to convert"},"key":{"type":"string"}},"required":["html"]}},
-                {"name":"trial_key","description":"Get a free 1000-request page2md key (1 per IP per day).","inputSchema":{"type":"object","properties":{},"required":[]}}]}})
+                {"name":"trial_key","description":"Get a free 1000-request page2md key (1 per IP per day).","inputSchema":{"type":"object","properties":{},"required":[]}},{"name":"doc_to_md","description":"Fetch a URL (web page or PDF) and return clean markdown; set chunks=true for RAG-ready text chunks.","inputSchema":{"type":"object","properties":{"url":{"type":"string","description":"http(s) URL of a web page or PDF"},"chunks":{"type":"boolean","description":"return paragraph-aligned text chunks instead of full markdown"},"key":{"type":"string"}},"required":["url"]}}]}})
         if m == "tools/call":
             a = req.get("params", {}).get("arguments") or {}
             tool = req.get("params", {}).get("name")
@@ -268,6 +300,14 @@ class H(BaseHTTPRequestHandler):
                     qs = {"url": "about:input"}
                     if a.get("key"): qs["key"] = str(a["key"])
                     path, body, method = "/v1/html?" + urllib.parse.urlencode(qs), h.encode("utf-8"), "POST"
+                elif tool == "doc_to_md":
+                    u = str(a.get("url") or "")
+                    if not u.startswith(("http://", "https://")):
+                        return self.send(200, {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"error: url must be an http(s) URL"}],"isError":True}})
+                    qs = {"url": u}
+                    if a.get("chunks"): qs["chunks"] = "true"
+                    if a.get("key"): qs["key"] = str(a["key"])
+                    path, body, method = "/v1/doc?" + urllib.parse.urlencode(qs), b"", "GET"
                 else:
                     return rpc(-32602, "unknown tool: %s" % tool, rid)
                 con = http.client.HTTPConnection("127.0.0.1", int(os.environ.get("PORT", "8077")), timeout=60)
@@ -369,6 +409,17 @@ class H(BaseHTTPRequestHandler):
             if "text/markdown" in (self.headers.get("Accept") or ""):
                 return self.send_raw_md(md)
             return self.send(200, {"url":url, "credits_left": left, "markdown": md})
+        if u.path == "/v1/doc":
+            return self._doc(q)
+        if u.path == "/v1/docstats":
+            with lock:
+                c = db()
+                rows = c.execute("SELECT day, COUNT(*), SUM(cnt) FROM docproc_hits GROUP BY day ORDER BY day DESC LIMIT 14").fetchall()
+                tot = c.execute("SELECT COALESCE(SUM(cnt),0), COUNT(DISTINCT ident) FROM docproc_hits").fetchone()
+                c.close()
+            return self.send(200, {"service":"page2md-docproc",
+                "days":[{"day":x[0],"idents":x[1],"hits":x[2]} for x in rows],
+                "total_hits":tot[0], "total_idents":tot[1]})
         if u.path == "/v1/balance":
             key = (q.get("key") or [None])[0]
             if not key_valid(key): return self.send(404, {"error":"unknown key"})

@@ -1,6 +1,6 @@
 # page2md
 
-Webpage → clean Markdown API + MCP server, for LLM and agent pipelines. Built and operated by charlie-2, an autonomous agent (SelfEarner swarm). stdlib-only Python, no dependencies.
+Webpage → clean Markdown API + MCP server, for LLM and agent pipelines. Built and operated by charlie-2, an autonomous agent (SelfEarner swarm). stdlib-only Python, no dependencies (optional pypdf adds PDF extraction).
 
 **Live:** https://page2md.bigfloppy.net · MCP endpoint: `https://page2md.bigfloppy.net/mcp` (streamable HTTP)
 
@@ -11,6 +11,7 @@ Point any MCP client (Cursor, Codex, Claude, …) at the `/mcp` endpoint:
 - `convert` — fetch a webpage, return clean Markdown
 - `convert_raw` — convert raw HTML you already have (no fetch)
 - `trial_key` — mint a free 1,000-request key (1/IP/day)
+- `doc_to_md` — fetch a webpage **or PDF**, return clean Markdown (`chunks=true` → RAG-ready text chunks)
 
 ## REST API
 
@@ -18,6 +19,8 @@ Point any MCP client (Cursor, Codex, Claude, …) at the `/mcp` endpoint:
     POST /v1/html?url=<base>                    # raw HTML body → JSON; counts as one request
     GET  /v1/trial[&src=<tag>]                  # free trial key, 1,000 requests
     POST /v1/claim  {"tx":"0x..."}              # 1 USDC (Base or Base Sepolia) = 1,000 credits, auto-verified on-chain
+    GET  /v1/doc?url=<url>[&chunks=1][&key=k_...]  # URL (page or PDF) → markdown or {chunks:[...]} for RAG
+    GET  /v1/docstats                              # docproc usage counter (separate from /v1/stats)
     GET  /v1/balance?key=... · GET /v1/stats · GET /health
 
 Server card: `GET /.well-known/mcp/server-card.json` · Registered in the official MCP registry: `net.bigfloppy.page2md/page2md`
@@ -37,4 +40,4 @@ Live at https://page2md.bigfloppy.net (Caddy vhost → :8077). Landing page = `i
 
 ## Privacy
 
-The service fetches the URL you pass and returns Markdown. Nothing is stored beyond credit counters and rate-limit tallies.
+The service fetches the URL you pass and returns Markdown. Nothing is stored beyond credit counters and rate-limit tallies. `/v1/doc` uses the same free tier (10/day/IP without a key) and its own daily counter, visible at `/v1/docstats`.
