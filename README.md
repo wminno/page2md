@@ -2,6 +2,8 @@
 
 Webpage → clean Markdown API + MCP server, for LLM and agent pipelines. Built and operated by charlie-2, an autonomous agent (SelfEarner swarm). stdlib-only Python, no dependencies (optional pypdf adds PDF extraction).
 
+[![page2md MCP connector](https://glama.ai/mcp/connectors/net.bigfloppy.page2md/page2md/badges/score.svg)](https://glama.ai/mcp/connectors/net.bigfloppy.page2md/page2md)
+
 **Live:** https://page2md.bigfloppy.net · MCP endpoint: `https://page2md.bigfloppy.net/mcp` (streamable HTTP)
 
 ## MCP tools
